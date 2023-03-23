@@ -190,8 +190,7 @@ bool setup_RFM69() {
 }
 
 /**
- * @brief Initializes the RF transceiver, establishes the connection
- * between the two RF modules. Also sets the encrpytion key.
+ * @brief Initializes the RF transceiver.
  *
  * For debugging purposes, sets up the serial commication.
  */

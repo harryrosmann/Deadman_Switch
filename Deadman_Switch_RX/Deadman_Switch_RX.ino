@@ -103,6 +103,11 @@ void setup_digital() {
   digitalWrite(RFM69_RST, LOW);
 }
 
+/**
+ * @brief Initializes the RF transceiver.
+ *
+ * For debugging purposes, sets up the serial commication.
+ */
 void setup() 
 {
   Serial.begin(115200);
@@ -181,6 +186,10 @@ void send_reply(short msg_type) {
   Serial.print("Sent a reply: "); Serial.println(pckt);
 }
 
+/**
+ * @brief Processes the received message. Updates the current state of
+ * the vehicle and the connection to button.
+*/
 void process_message(short msg_type) {
   // Send the reply (echo the message)
   send_reply(msg_type);
@@ -210,7 +219,7 @@ void process_message(short msg_type) {
 * @brief Reads the message and sends a reply (echoes the message)
 * @return the true if a valid message received, otherwise false
 */
-bool receive_message() {
+void receive_message() {
   short msg_state = UNKNOWN;
 
   if (rf69.waitAvailableTimeout(CONNECTION_TIMEOUT_MS)) {
@@ -233,15 +242,16 @@ bool receive_message() {
       }
 
       process_message(msg_state);
-
-      return true;
     }
   }
   // Disconnected, timed out
   set_connection(false);
-  return false;
 }
 
+/**
+ * @brief Infinite loop. Just receives message when available, and responds
+ * to the messages as they come in.
+*/
 void loop() {
   receive_message();
 }
