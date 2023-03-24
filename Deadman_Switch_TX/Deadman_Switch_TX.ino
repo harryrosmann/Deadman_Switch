@@ -18,7 +18,7 @@
 #define RF69_FREQ 434.0         // 434 MHz
 #define DEBOUNCE_DELAY_MS 20    // 20ms debounce delay
 #define HEARTBEAT_DELAY_MS 100  // Delay between heartbeat signals
-#define REPLY_TIMEOUT_MS   20   // Reply timeout before sending another message
+#define REPLY_TIMEOUT_MS   50   // Reply timeout before sending another message
 #define CONNECTION_TIMEOUT_MS 2000 // Number of ms to pass without reply
                                    // before determining connection is lost
 #define GO 0x1                  // Go status
@@ -28,7 +28,7 @@
 
 // Messages to send the car for each state
 #define CONNECTION_MSG "CONNECT"
-#define GO_MSG "SEND IT"
+#define GO_MSG "SENDIT"
 #define STOP_MSG "STOP"
 #define UNKNOWN_MSG "UNKNOWN"
 
@@ -106,7 +106,7 @@ bool button_pressed() {
 
   /* Wait for delay to allow button to debounce */
   unsigned long press_start_ms = millis();
-  while ((millis() - press_start_ms) < DEBOUNCE_DELAY_MS) {
+  while (millis() < pres_start_ms +         DEBOUNCE_DELAY_MS) {
     /* Spin */
   }
 
@@ -136,7 +136,7 @@ void disconnect() {
   car_state = UNKNOWN;
   toggle_led(false);
   Serial.println("Stop signal not received");
-  Serial.println("Disconnecting...")
+  Serial.println("Disconnecting...");
 }
 
 /**
@@ -217,7 +217,7 @@ void setup()
  * @brief Takes in a message type and returns the string associated with 
  * that message
  * 
- * @param[in] msg_type The type of message
+ * @param[in] msg_type The type of message 
  * @return The string value associated with that message
 */
 char *get_message_base(byte msg_type) {
@@ -251,20 +251,21 @@ bool send_message(short msg_type) {
 
   // Triple the message and place it into packet
   size_t msg_len = strlen(msg);
-  size_t pckt_len = 3 * (msg_len + 1);
-  char pckt[msg_len];
+  size_t pckt_len = (3 * msg_len) + 1;
+  char pckt[pckt_len];
   size_t i;
-  for (i = 0; i < msg_len; i += msg_len) {
-    strncpy(pckt + i, msg, msg_len);
+  for (i = 0; i < pckt_len; i += msg_len) {
+      strncpy(pckt + i, msg, msg_len);
   }
+  pckt[i] = '\0';
 
   msg_send_start_ms = millis();
 
   // Keep sending the message until receives reply or connection is lost
-  while ((msg_send_start_ms - millis()) < CONNECTION_TIMEOUT_MS) {
+  while (millis() < msg_send_start_ms + CONNECTION_TIMEOUT_MS) {
     // Send the message
     Serial.print("Sending: "); Serial.println(pckt);
-    rf69.send((uint8_t *)pckt, strlen(msg_len));
+    rf69.send((uint8_t *)pckt, pckt_len);
     rf69.waitPacketSent();
     
     // Wait for reply
@@ -273,7 +274,10 @@ bool send_message(short msg_type) {
       if (rf69.recv(buf, &len)) {
         if (strstr((char *)buf, msg)) {
           return true;
-        }
+        } else if (strstr((char *)buf, UNKNOWN_MSG)) {
+          // Receiver did not understand, send again
+          continue;
+        }        
       }
     }
   }
@@ -312,8 +316,7 @@ void send_init_message(short next_car_state) {
  * @brief Sends a hearbeat signal with the current state of the car
 */
 void send_heartbeat() {
-  // Not time to send a heartbeat, continue
-  if ((heartbeat_ms - millis()) < HEARTBEAT_DELAY_MS) {
+  if (millis() < heartbeat_ms + HEARTBEAT_DELAY_MS) {
     return;
   }
 
@@ -322,7 +325,7 @@ void send_heartbeat() {
     disconnect();
   }
 
-  Serial.println("Heartbeat %lu received", n_heartbeat);
+  Serial.print("Heartbeat received: #"); Serial.println(n_heartbeat, DEC);
 
   // Update heartbeat counters
   n_heartbeat++;

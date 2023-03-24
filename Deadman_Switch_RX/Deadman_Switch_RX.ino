@@ -26,7 +26,7 @@
 
 // Messages to send the car for each state
 #define CONNECTION_MSG "CONNECT"
-#define GO_MSG "SEND IT"
+#define GO_MSG "SENDIT"
 #define STOP_MSG "STOP"
 #define UNKNOWN_MSG "UNKNOWN"
 
@@ -174,14 +174,15 @@ void send_reply(short msg_type) {
 
   // Triple the message and place it into packet
   size_t msg_len = strlen(msg);
-  size_t pckt_len = 3 * (msg_len + 1);
-  char pckt[msg_len];
+  size_t pckt_len = (3 * msg_len) + 1;
+  char pckt[pckt_len];
   size_t i;
-  for (i = 0; i < msg_len; i += msg_len) {
-    strncpy(pckt + i, msg, msg_len);
+  for (i = 0; i < pckt_len; i += msg_len) {
+      strncpy(pckt + i, msg, msg_len);
   }
+  pckt[i] = '\0';
 
-  rf69.send((uint8_t *)pckt, strlen(pckt));
+  rf69.send((uint8_t *)pckt, pckt_len);
   rf69.waitPacketSent();
   Serial.print("Sent a reply: "); Serial.println(pckt);
 }
@@ -229,9 +230,8 @@ void receive_message() {
     if (rf69.recv(buf, &len)) {
       if (!len) return;
       buf[len] = 0;
-
-      Serial.print("Received message: ");
-      Serial.println((char *)buf);
+      Serial.print("Received: ");
+      Serial.println((char*)buf);
 
       if (strstr((char *)buf, GO_MSG)) {
         msg_state = GO;
@@ -242,9 +242,11 @@ void receive_message() {
       }
 
       process_message(msg_state);
+      return;
     }
   }
-  // Disconnected, timed out
+
+  // Timed out - disconnect
   set_connection(false);
 }
 
@@ -262,7 +264,7 @@ void loop() {
  * @param[in] on The desired state of the LED
 */
 void toggle_led(bool on) {
-  byte state = on ? HIGH : LOW;
+  short state = on ? HIGH : LOW;
   digitalWrite(LED, state);
 }
 
