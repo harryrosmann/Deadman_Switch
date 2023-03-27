@@ -10,13 +10,13 @@
 
 #include <SPI.h>
 #include <RH_RF69.h>
+#include <packetEngine.h>
 
 /************ Radio Setup ***************/
-
 // Change to 434.0 or other frequency, must match RX's freq!
 #define RF69_FREQ 434.0         // 434 MHz
 #define HEARTBEAT_DELAY_MS 100  // Delay between heartbeat signals
-#define REPLY_TIMEOUT_MS   20   // Reply timeout before sending another message
+#define REPLY_TIMEOUT_MS   50   // Reply timeout before sending another message
 #define CONNECTION_TIMEOUT_MS 2000 // Number of ms to pass without reply
                                    // before determining connection is lost
 #define GO 0x1                  // Go status
@@ -24,22 +24,23 @@
 #define CONNECT 0x2             // Connection status
 #define UNKNOWN 0x3             // Unknown status
 
-// Messages to send the car for each state
+/************ MESSAGES ***************/
 #define CONNECTION_MSG "CONNECT"
 #define GO_MSG "SENDIT"
 #define STOP_MSG "STOP"
 #define UNKNOWN_MSG "UNKNOWN"
+
+#define PAYLOAD_LEN 20 // Length used for every payload
+#define PACKET_LEN RH_RF69_MAX_MESSAGE_LEN // Used for every packet
 
 #if defined (__AVR_ATmega32U4__) // Feather 32u4 w/Radio
   #define RFM69_CS      8
   #define RFM69_INT     7
   #define RFM69_RST     4
   #define LED           13
-  #define ON_OFF        12
 #endif
 
-// Singleton instance of the radio driver
-RH_RF69 rf69(RFM69_CS, RFM69_INT);
+#define ON_OFF        12 // Relay output pin
 
 /** @brief Track ms between first transmission and reply */
 unsigned long reply_ms = 0UL;
@@ -52,6 +53,9 @@ short car_state = UNKNOWN;
 
 /** @brief Current connection status */
 bool connected = false;
+
+// Singleton instance of the radio driver
+RH_RF69 rf69(RFM69_CS, RFM69_INT);
 
 /**
  * @brief Initializes the RFM69 module
@@ -86,9 +90,9 @@ bool setup_RFM69() {
   rf69.setTxPower(20, true); // range from 14-20 for power, 2nd arg must be true for 69HCW
 
   // The encryption key has to be the same as the one in the server
-  uint8_t key[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-                   0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
-  rf69.setEncryptionKey(key);
+  // uint8_t key[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+  //                  0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
+  // rf69.setEncryptionKey(key);
 
   return true;
 }
@@ -127,19 +131,6 @@ void setup()
   Serial.println(" MHz");
 }
 
-/** 
- * @brief Sets the connection flag, toggles led
- */
-bool set_connection(bool is_connected) {
-  if (!is_connected) {
-    // Turn off the motor
-    toggle_power(false);
-  }
-
-  connected = is_connected;
-  toggle_led(is_connected);
-}
-
 /**
  * @brief Takes in a message type and returns the string associated with 
  * that message
@@ -161,30 +152,34 @@ char *get_message_base(byte msg_type) {
 }
 
 /**
- * @brief Sends a message reply to the transmitting module
-*/
-void send_reply(short msg_type) {
-  char *msg;
-  uint8_t buf[RH_RF69_MAX_MESSAGE_LEN];
-  uint8_t len = sizeof(buf);
-  unsigned long msg_send_start_ms; // When we first send the message
-
-  // Get the message to send
-  msg = get_message_base(msg_type);
-
-  // Triple the message and place it into packet
-  size_t msg_len = strlen(msg);
-  size_t pckt_len = (3 * msg_len) + 1;
-  char pckt[pckt_len];
-  size_t i;
-  for (i = 0; i < pckt_len; i += msg_len) {
-      strncpy(pckt + i, msg, msg_len);
+ * @brief Blinks output at defined at PIN LOOPS times with DELAY_MS in between.
+ *
+ * @param PIN The pin to blink
+ * @param DELAY_MS The delay in ms between blinks
+ * @param loops The number of loops between blinks
+ */
+void blink(byte PIN, byte DELAY_MS, byte loops) {
+  for (byte i = 0; i < loops; i++) {
+    digitalWrite(PIN, HIGH);
+    delay(DELAY_MS);
+    digitalWrite(PIN, LOW);
+    if (i != loops - 1) {
+      delay(DELAY_MS);
+    }
   }
-  pckt[i] = '\0';
+}
 
-  rf69.send((uint8_t *)pckt, pckt_len);
-  rf69.waitPacketSent();
-  Serial.print("Sent a reply: "); Serial.println(pckt);
+/** 
+ * @brief Sets the connection flag, toggles led
+ */
+bool set_connection(bool is_connected) {
+  if (!is_connected) {
+    // Turn off the motor
+    toggle_power(false);
+  }
+
+  connected = is_connected;
+  toggle_led(is_connected);
 }
 
 /**
@@ -217,6 +212,37 @@ void process_message(short msg_type) {
 }
 
 /**
+ * @brief Sends a message reply to the transmitting module
+*/
+void send_reply(short msg_type) {
+  char *msg;
+  uint8_t send_payload[PAYLOAD_LEN];
+  uint8_t send_packet[PACKET_LEN];
+  unsigned long msg_send_start_ms; // When we first send the message
+
+  // Get the message to send
+  msg = get_message_base(msg_type);
+
+  // Place as many copies in the payload as possible
+  size_t msg_len = strlen(msg);
+  size_t i;
+  for (i = 0; i < PAYLOAD_LEN; i += msg_len) {
+      strncpy(((char *)send_payload)+ i, msg, msg_len);
+  }
+  ((char*)send_payload)[i] = '\0';
+
+  Serial.print("Sending a reply: "); Serial.println((char*)send_payload);
+
+  // Construct the packet and send
+  if (constructPacket(send_payload, PAYLOAD_LEN, send_packet, PACKET_LEN) < 0) {
+    Serial.println("Could not construct packet");
+  }
+
+  rf69.send(send_packet, PACKET_LEN);
+  rf69.waitPacketSent();
+}
+
+/**
 * @brief Reads the message and sends a reply (echoes the message)
 * @return the true if a valid message received, otherwise false
 */
@@ -224,20 +250,21 @@ void receive_message() {
   short msg_state = UNKNOWN;
 
   if (rf69.waitAvailableTimeout(CONNECTION_TIMEOUT_MS)) {
-    // Should be a message for us now   
-    uint8_t buf[RH_RF69_MAX_MESSAGE_LEN];
-    uint8_t len = sizeof(buf);
-    if (rf69.recv(buf, &len)) {
-      if (!len) return;
-      buf[len] = 0;
-      Serial.print("Received: ");
-      Serial.println((char*)buf);
+    // Should be a message for us now
+  uint8_t rec_payload[PAYLOAD_LEN];
+  uint8_t rec_packet[PACKET_LEN];
+  uint8_t rec_len = PACKET_LEN;
 
-      if (strstr((char *)buf, GO_MSG)) {
+    if (rf69.recv(rec_packet, &rec_len)) {
+      if (decodePacket(rec_packet, PACKET_LEN, rec_payload, PAYLOAD_LEN) < 0) {
+        Serial.println("Could not receive packet");
+      }
+
+      if (strstr((char *)rec_payload, GO_MSG)) {
         msg_state = GO;
-      } else if (strstr((char *)buf, STOP_MSG)) {
+      } else if (strstr((char *)rec_payload, STOP_MSG)) {
         msg_state = STOP;
-      } else if (strstr((char *)buf, CONNECTION_MSG)) {
+      } else if (strstr((char *)rec_payload, CONNECTION_MSG)) {
         msg_state = CONNECT;
       }
 
@@ -276,22 +303,4 @@ void toggle_led(bool on) {
 void toggle_power(bool on) {
   short state = on ? HIGH : LOW;
   digitalWrite(ON_OFF, state);
-}
-
-/**
- * @brief Blinks output at defined at PIN LOOPS times with DELAY_MS in between.
- *
- * @param PIN The pin to blink
- * @param DELAY_MS The delay in ms between blinks
- * @param loops The number of loops between blinks
- */
-void blink(byte PIN, byte DELAY_MS, byte loops) {
-  for (byte i = 0; i < loops; i++) {
-    digitalWrite(PIN, HIGH);
-    delay(DELAY_MS);
-    digitalWrite(PIN, LOW);
-    if (i != loops - 1) {
-      delay(DELAY_MS);
-    }
-  }
 }

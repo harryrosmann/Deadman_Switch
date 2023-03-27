@@ -10,6 +10,7 @@
 
 #include <SPI.h>
 #include <RH_RF69.h>
+#include <packetEngine.h>
 #include <string.h>
 
 /************ Radio Setup ***************/
@@ -32,13 +33,17 @@
 #define STOP_MSG "STOP"
 #define UNKNOWN_MSG "UNKNOWN"
 
+#define PAYLOAD_LEN 20 // Length used for every payload
+#define PACKET_LEN RH_RF69_MAX_MESSAGE_LEN // Used for every packet
+
 #if defined(__AVR_ATmega32U4__) // Feather 32u4 w/Radio
 #define RFM69_CS 8
 #define RFM69_INT 7
 #define RFM69_RST 4
 #define LED 13
-#define BUTTON 12
 #endif
+
+#define BUTTON 12
 
 // Singleton instance of the radio driver
 RH_RF69 rf69(RFM69_CS, RFM69_INT);
@@ -106,7 +111,7 @@ bool button_pressed() {
 
   /* Wait for delay to allow button to debounce */
   unsigned long press_start_ms = millis();
-  while (millis() < pres_start_ms +         DEBOUNCE_DELAY_MS) {
+  while (millis() < press_start_ms +         DEBOUNCE_DELAY_MS) {
     /* Spin */
   }
 
@@ -182,9 +187,9 @@ bool setup_RFM69() {
   rf69.setTxPower(20, true); // range from 14-20 for power, 2nd arg must be true for 69HCW
 
   // The encryption key has to be the same as the one in the server
-  uint8_t key[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-                   0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
-  rf69.setEncryptionKey(key);
+  // uint8_t key[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+  //                  0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
+  // rf69.setEncryptionKey(key);
 
   return true;
 }
@@ -242,39 +247,54 @@ char *get_message_base(byte msg_type) {
 */
 bool send_message(short msg_type) {
   char *msg;
-  uint8_t buf[RH_RF69_MAX_MESSAGE_LEN];
-  uint8_t len = sizeof(buf);
+  uint8_t send_payload[PAYLOAD_LEN];
+  uint8_t send_packet[PACKET_LEN];
+  uint8_t rec_payload[PAYLOAD_LEN];
+  uint8_t rec_packet[PACKET_LEN];
+  uint8_t rec_len = PACKET_LEN;
   unsigned long msg_send_start_ms; // When we first send the message
 
   // Get the message to send
   msg = get_message_base(msg_type);
 
-  // Triple the message and place it into packet
+  // Place as many copies in the payload as possible
   size_t msg_len = strlen(msg);
-  size_t pckt_len = (3 * msg_len) + 1;
-  char pckt[pckt_len];
   size_t i;
-  for (i = 0; i < pckt_len; i += msg_len) {
-      strncpy(pckt + i, msg, msg_len);
+  for (i = 0; i < PAYLOAD_LEN; i += msg_len) {
+      strncpy(((char *)send_payload)+ i, msg, msg_len);
   }
-  pckt[i] = '\0';
+  ((char*)send_payload)[i] = '\0';
+
+  Serial.print("Sending: "); Serial.println((char*)send_payload);
+
+  // Construct the packet
+  if (constructPacket(send_payload, PAYLOAD_LEN, send_packet, PACKET_LEN)  < 0) {
+    Serial.println("Could not construct packet.");
+  }
 
   msg_send_start_ms = millis();
 
   // Keep sending the message until receives reply or connection is lost
   while (millis() < msg_send_start_ms + CONNECTION_TIMEOUT_MS) {
     // Send the message
-    Serial.print("Sending: "); Serial.println(pckt);
-    rf69.send((uint8_t *)pckt, pckt_len);
+    rf69.send(send_packet, PACKET_LEN);
     rf69.waitPacketSent();
     
     // Wait for reply
     if (rf69.waitAvailableTimeout(REPLY_TIMEOUT_MS)) {
       // Should be a reply message for us now
-      if (rf69.recv(buf, &len)) {
-        if (strstr((char *)buf, msg)) {
+      if (rf69.recv(rec_packet, &rec_len)) {
+        
+        // Decode the packet
+        if (decodePacket(rec_packet, PACKET_LEN, rec_payload, PAYLOAD_LEN) < 0) {
+          Serial.println("Could not deconstruct packet.");
+          continue;
+        }
+
+        Serial.println((char*)rec_payload);
+        if (strstr((char *)rec_payload, msg)) {
           return true;
-        } else if (strstr((char *)buf, UNKNOWN_MSG)) {
+        } else if (strstr((char *)rec_payload, UNKNOWN_MSG)) {
           // Receiver did not understand, send again
           continue;
         }        
