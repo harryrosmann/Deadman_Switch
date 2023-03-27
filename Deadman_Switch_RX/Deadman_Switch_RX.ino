@@ -236,6 +236,7 @@ void send_reply(short msg_type) {
   // Construct the packet and send
   if (constructPacket(send_payload, PAYLOAD_LEN, send_packet, PACKET_LEN) < 0) {
     Serial.println("Could not construct packet");
+    return;
   }
 
   rf69.send(send_packet, PACKET_LEN);
@@ -258,6 +259,8 @@ void receive_message() {
     if (rf69.recv(rec_packet, &rec_len)) {
       if (decodePacket(rec_packet, PACKET_LEN, rec_payload, PAYLOAD_LEN) < 0) {
         Serial.println("Could not receive packet");
+        process_message(UNKNOWN);
+        return;
       }
 
       if (strstr((char *)rec_payload, GO_MSG)) {

@@ -270,6 +270,7 @@ bool send_message(short msg_type) {
   // Construct the packet
   if (constructPacket(send_payload, PAYLOAD_LEN, send_packet, PACKET_LEN)  < 0) {
     Serial.println("Could not construct packet.");
+    return;
   }
 
   msg_send_start_ms = millis();
