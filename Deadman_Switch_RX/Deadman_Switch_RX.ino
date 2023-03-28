@@ -173,9 +173,16 @@ void blink(byte PIN, byte DELAY_MS, byte loops) {
  * @brief Sets the connection flag, toggles led
  */
 bool set_connection(bool is_connected) {
+  if (is_connected == connected) {
+    return;
+  }
+
   if (!is_connected) {
     // Turn off the motor
     toggle_power(false);
+    Serial.println("Disconnecting...");    
+  } else {
+    Serial.println("Connected!");
   }
 
   connected = is_connected;
@@ -198,7 +205,7 @@ void process_message(short msg_type) {
       set_connection(true);
       break;
     default:
-      set_connection(false);
+      return;
   }
 
   // If change of state, update accordingly
@@ -262,6 +269,9 @@ void receive_message() {
         process_message(UNKNOWN);
         return;
       }
+      rec_payload[PAYLOAD_LEN - 1] = '\0';
+
+      Serial.print("Received: "); Serial.println((char *)rec_payload);
 
       if (strstr((char *)rec_payload, GO_MSG)) {
         msg_state = GO;

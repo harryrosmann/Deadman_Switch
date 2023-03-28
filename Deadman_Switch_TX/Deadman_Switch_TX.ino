@@ -265,8 +265,6 @@ bool send_message(short msg_type) {
   }
   ((char*)send_payload)[i] = '\0';
 
-  Serial.print("Sending: "); Serial.println((char*)send_payload);
-
   // Construct the packet
   if (constructPacket(send_payload, PAYLOAD_LEN, send_packet, PACKET_LEN)  < 0) {
     Serial.println("Could not construct packet.");
@@ -280,8 +278,10 @@ bool send_message(short msg_type) {
     // Send the message
     rf69.send(send_packet, PACKET_LEN);
     rf69.waitPacketSent();
+
+    Serial.print("Sending: "); Serial.println((char*)send_payload);
     
-    // Wait for reply
+    // Wait for replyf
     if (rf69.waitAvailableTimeout(REPLY_TIMEOUT_MS)) {
       // Should be a reply message for us now
       if (rf69.recv(rec_packet, &rec_len)) {
@@ -291,6 +291,7 @@ bool send_message(short msg_type) {
           Serial.println("Could not deconstruct packet.");
           continue;
         }
+        rec_payload[PAYLOAD_LEN - 1] = '\0';
 
         Serial.println((char*)rec_payload);
         if (strstr((char *)rec_payload, msg)) {
@@ -344,6 +345,7 @@ void send_heartbeat() {
   // Send heartbeat
   if (!send_message(car_state)) {
     disconnect();
+    return;
   }
 
   Serial.print("Heartbeat received: #"); Serial.println(n_heartbeat, DEC);
